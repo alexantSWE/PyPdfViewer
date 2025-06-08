@@ -6,50 +6,44 @@ try:
 except ImportError:
     messagebox.showerror(
         "Error", 
-        "PyMuPDF is not installed. Please install it using: pip install PyMuPDF"
+        "PyMuPDF is not installed. Please run: pip install PyMuPDF"
     )
     exit()
 
 class PDFViewer:
     def __init__(self, root):
+        ### FIX: self.root = root must be the first line ###
         self.root = root
         self.root.title("Enhanced PDF Viewer")
         self.root.geometry("1000x800")
 
         # --- State Variables ---
-        self.pdf_document = None
+        self.pdf_data = None  # Will hold the raw bytes of the PDF
+        self.filepath = None  # Store the path for the title bar
         self.current_page = 0
         self.total_pages = 0
-        self.zoom_level = 1.0  # Initial zoom level
+        self.zoom_level = 1.0
         
-        # This is crucial to prevent the image from being garbage-collected
+        self.dark_mode_enabled = tk.BooleanVar(value=False)
         self.photo_image = None
-        # This will hold the ID of the image on the canvas
         self.canvas_image_item = None
 
         # --- UI Layout ---
-        # Main frame to hold all widgets
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Top frame for controls
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(fill=tk.X, pady=5, padx=5)
-
-        # --- Control Widgets ---
+        
+        # --- Create and place all widgets ---
         self.setup_controls(control_frame)
-        
-        # --- Display Area (Canvas with Scrollbars) ---
         self.setup_display_area(main_frame)
-        
-        # --- Keyboard Bindings ---
         self.setup_key_bindings()
 
     def setup_controls(self, parent_frame):
         """Creates and places all the control widgets."""
         ttk.Button(parent_frame, text="Open PDF", command=self.open_pdf).pack(side=tk.LEFT, padx=2)
         
-        # Navigation
         self.prev_button = ttk.Button(parent_frame, text="<", command=self.prev_page, state=tk.DISABLED)
         self.prev_button.pack(side=tk.LEFT, padx=2)
 
@@ -63,11 +57,17 @@ class PDFViewer:
         self.next_button = ttk.Button(parent_frame, text=">", command=self.next_page, state=tk.DISABLED)
         self.next_button.pack(side=tk.LEFT, padx=(2, 10))
 
-        # Zoom
         ttk.Button(parent_frame, text="-", command=self.zoom_out, width=2).pack(side=tk.LEFT, padx=2)
         self.zoom_label = ttk.Label(parent_frame, text="100%")
         self.zoom_label.pack(side=tk.LEFT, padx=2)
         ttk.Button(parent_frame, text="+", command=self.zoom_in, width=2).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Separator(parent_frame, orient='vertical').pack(side=tk.LEFT, padx=(10, 5), fill='y')
+        
+        dark_mode_check = ttk.Checkbutton(
+            parent_frame, text="Dark Mode", variable=self.dark_mode_enabled, command=self.toggle_dark_mode
+        )
+        dark_mode_check.pack(side=tk.LEFT, padx=5)
 
     def setup_display_area(self, parent_frame):
         """Creates the canvas and scrollbars for displaying the PDF."""
@@ -76,18 +76,15 @@ class PDFViewer:
 
         self.canvas = tk.Canvas(display_frame, bg="gray")
         
-        # Scrollbars
         v_scroll = ttk.Scrollbar(display_frame, orient=tk.VERTICAL, command=self.canvas.yview)
         h_scroll = ttk.Scrollbar(display_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
         
         self.canvas.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
         
-        # Grid layout for canvas and scrollbars
         self.canvas.grid(row=0, column=0, sticky='nsew')
         v_scroll.grid(row=0, column=1, sticky='ns')
         h_scroll.grid(row=1, column=0, sticky='ew')
         
-        # Make the canvas expandable
         display_frame.grid_rowconfigure(0, weight=1)
         display_frame.grid_columnconfigure(0, weight=1)
 
@@ -97,62 +94,71 @@ class PDFViewer:
         self.root.bind("<Right>", lambda event: self.next_page())
         self.root.bind("<plus>", lambda event: self.zoom_in())
         self.root.bind("<minus>", lambda event: self.zoom_out())
+        self.root.bind("<Control-o>", lambda event: self.open_pdf())
 
     def open_pdf(self):
         filepath = filedialog.askopenfilename(filetypes=[("PDF Files", "*.pdf")])
-        if not filepath:
-            return
-
+        if not filepath: return
+        
         try:
-            # Close previous document if open
-            if self.pdf_document:
-                self.pdf_document.close()
-                
-            self.pdf_document = fitz.open(filepath)
-            self.total_pages = len(self.pdf_document)
+            with open(filepath, "rb") as f:
+                self.pdf_data = f.read()
+            
+            temp_doc = fitz.open(stream=self.pdf_data, filetype="pdf")
+            self.total_pages = len(temp_doc)
+            temp_doc.close()
+            
+            self.filepath = filepath
             self.current_page = 0
-            self.zoom_level = 1.0  # Reset zoom on new file
+            self.zoom_level = 1.0
+            
             self.show_page()
             self.root.title(f"Enhanced PDF Viewer - {filepath.split('/')[-1]}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open PDF: {e}")
-            self.pdf_document = None # Reset state on failure
+            self.pdf_data = None
 
     def show_page(self):
-        if not self.pdf_document:
-            return
+        if not self.pdf_data: return
 
-        # Clear the canvas before drawing the new page
         if self.canvas_image_item:
             self.canvas.delete(self.canvas_image_item)
 
-        page = self.pdf_document.load_page(self.current_page)
+        doc = fitz.open(stream=self.pdf_data, filetype="pdf")
+        page = doc.load_page(self.current_page)
         
-        # Render page with current zoom level
+        if self.dark_mode_enabled.get():
+            page.invert_colors()
+
         mat = fitz.Matrix(self.zoom_level, self.zoom_level)
         pix = page.get_pixmap(matrix=mat)
         
-        # Convert pixmap to a PhotoImage
+        doc.close()
+        
         img_data = pix.tobytes("ppm")
         self.photo_image = tk.PhotoImage(data=img_data)
         
-        # Display the image on the canvas
         self.canvas_image_item = self.canvas.create_image(0, 0, anchor='nw', image=self.photo_image)
-        
-        # Update the canvas scroll region to match the image size
         self.canvas.config(scrollregion=self.canvas.bbox('all'))
         
         self.update_ui()
+        
+    def toggle_dark_mode(self):
+        bg_color = "#333333" if self.dark_mode_enabled.get() else "gray"
+        self.canvas.config(bg=bg_color)
+        
+        if self.pdf_data:
+            self.show_page()
 
     def update_ui(self):
-        """Updates all UI elements based on the current state."""
-        if not self.pdf_document:
+        if not self.pdf_data:
             self.page_label.config(text="/ 0")
             self.page_entry.delete(0, tk.END)
             self.zoom_label.config(text="---%")
+            self.prev_button['state'] = tk.DISABLED
+            self.next_button['state'] = tk.DISABLED
             return
 
-        # Update page navigation
         self.page_label.config(text=f"/ {self.total_pages}")
         self.page_entry.delete(0, tk.END)
         self.page_entry.insert(0, str(self.current_page + 1))
@@ -160,22 +166,20 @@ class PDFViewer:
         self.prev_button['state'] = tk.NORMAL if self.current_page > 0 else tk.DISABLED
         self.next_button['state'] = tk.NORMAL if self.current_page < self.total_pages - 1 else tk.DISABLED
 
-        # Update zoom label
         self.zoom_label.config(text=f"{int(self.zoom_level * 100)}%")
 
     def next_page(self):
-        if self.pdf_document and self.current_page < self.total_pages - 1:
+        if self.pdf_data and self.current_page < self.total_pages - 1:
             self.current_page += 1
             self.show_page()
 
     def prev_page(self):
-        if self.pdf_document and self.current_page > 0:
+        if self.pdf_data and self.current_page > 0:
             self.current_page -= 1
             self.show_page()
 
     def go_to_page(self, event=None):
-        if not self.pdf_document:
-            return
+        if not self.pdf_data: return
         try:
             page_num = int(self.page_entry.get())
             if 1 <= page_num <= self.total_pages:
@@ -183,21 +187,22 @@ class PDFViewer:
                 self.show_page()
             else:
                 messagebox.showwarning("Warning", f"Page number must be between 1 and {self.total_pages}.")
-                self.update_ui() # Reset entry to current page
+                self.update_ui()
         except ValueError:
             messagebox.showerror("Error", "Please enter a valid page number.")
-            self.update_ui() # Reset entry to current page
+            self.update_ui()
 
     def zoom_in(self):
-        if not self.pdf_document: return
+        if not self.pdf_data: return
         self.zoom_level *= 1.2
         self.show_page()
 
     def zoom_out(self):
-        if not self.pdf_document: return
-        if self.zoom_level / 1.2 > 0.1: # Prevent zooming too small
+        if not self.pdf_data: return
+        if self.zoom_level / 1.2 > 0.1:
             self.zoom_level /= 1.2
             self.show_page()
+
 
 if __name__ == "__main__":
     root = tk.Tk()
