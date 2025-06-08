@@ -1,45 +1,77 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-try:
-    import fitz  # PyMuPDF
-except ImportError:
-    messagebox.showerror(
-        "Error", 
-        "PyMuPDF is not installed. Please run: pip install PyMuPDF"
-    )
-    exit()
+# ... (the rest of the code is the same as the previous correct version) ...
 
 class PDFViewer:
     def __init__(self, root):
-        ### FIX: self.root = root must be the first line ###
         self.root = root
         self.root.title("Enhanced PDF Viewer")
         self.root.geometry("1000x800")
-
-        # --- State Variables ---
-        self.pdf_data = None  # Will hold the raw bytes of the PDF
-        self.filepath = None  # Store the path for the title bar
+        # ... (rest of __init__ is unchanged) ...
+        self.pdf_data = None
+        self.filepath = None
         self.current_page = 0
         self.total_pages = 0
         self.zoom_level = 1.0
-        
         self.dark_mode_enabled = tk.BooleanVar(value=False)
         self.photo_image = None
         self.canvas_image_item = None
-
-        # --- UI Layout ---
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True)
-
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(fill=tk.X, pady=5, padx=5)
-        
-        # --- Create and place all widgets ---
         self.setup_controls(control_frame)
         self.setup_display_area(main_frame)
         self.setup_key_bindings()
 
+    # ... (setup_controls, setup_display_area, setup_key_bindings are unchanged) ...
+
+    ### MODIFIED FUNCTION ###
+    def open_pdf(self):
+        filepath = filedialog.askopenfilename(filetypes=[("PDF Files", "*.pdf")])
+        if not filepath:
+            # User cancelled the dialog, so we do nothing.
+            return
+        
+        # --- Start of the robust reset logic ---
+        # 1. A new file has been chosen. First, clear the canvas of any old image.
+        if self.canvas_image_item:
+            self.canvas.delete(self.canvas_image_item)
+            self.canvas_image_item = None
+            self.photo_image = None # Release the image reference
+        
+        # 2. Reset the data state before trying to load the new file.
+        self.pdf_data = None
+
+        try:
+            # 3. Read the new file into memory.
+            with open(filepath, "rb") as f:
+                self.pdf_data = f.read()
+            
+            # 4. Open a temporary document to get page count.
+            temp_doc = fitz.open(stream=self.pdf_data, filetype="pdf")
+            self.total_pages = len(temp_doc)
+            temp_doc.close()
+            
+            # 5. Reset state for the new file.
+            self.filepath = filepath
+            self.current_page = 0
+            self.zoom_level = 1.0
+            
+            # 6. Render the first page. This will draw the new content.
+            self.show_page()
+            self.root.title(f"Enhanced PDF Viewer - {filepath.split('/')[-1]}")
+
+        except Exception as e:
+            # 7. If anything goes wrong, reset the entire UI to a clean, empty state.
+            messagebox.showerror("Error", f"Failed to open PDF: {e}")
+            self.pdf_data = None  # Ensure data is None
+            self.update_ui()      # Update controls to show "Page 0 of 0", etc.
+            self.root.title("Enhanced PDF Viewer") # Reset title
+
+
+    # ... (show_page, toggle_dark_mode, update_ui, and all other methods are unchanged) ...
     def setup_controls(self, parent_frame):
         """Creates and places all the control widgets."""
         ttk.Button(parent_frame, text="Open PDF", command=self.open_pdf).pack(side=tk.LEFT, padx=2)
@@ -95,29 +127,7 @@ class PDFViewer:
         self.root.bind("<plus>", lambda event: self.zoom_in())
         self.root.bind("<minus>", lambda event: self.zoom_out())
         self.root.bind("<Control-o>", lambda event: self.open_pdf())
-
-    def open_pdf(self):
-        filepath = filedialog.askopenfilename(filetypes=[("PDF Files", "*.pdf")])
-        if not filepath: return
         
-        try:
-            with open(filepath, "rb") as f:
-                self.pdf_data = f.read()
-            
-            temp_doc = fitz.open(stream=self.pdf_data, filetype="pdf")
-            self.total_pages = len(temp_doc)
-            temp_doc.close()
-            
-            self.filepath = filepath
-            self.current_page = 0
-            self.zoom_level = 1.0
-            
-            self.show_page()
-            self.root.title(f"Enhanced PDF Viewer - {filepath.split('/')[-1]}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to open PDF: {e}")
-            self.pdf_data = None
-
     def show_page(self):
         if not self.pdf_data: return
 
@@ -202,7 +212,6 @@ class PDFViewer:
         if self.zoom_level / 1.2 > 0.1:
             self.zoom_level /= 1.2
             self.show_page()
-
 
 if __name__ == "__main__":
     root = tk.Tk()
